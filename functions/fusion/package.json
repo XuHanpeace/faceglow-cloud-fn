@@ -1,0 +1,12 @@
+{
+  "name": "fusion",
+  "version": "1.0.0",
+  "description": "腾讯云 TCB 云函数 - 人脸融合",
+  "main": "index.js",
+  "dependencies": {
+    "tencentcloud-sdk-nodejs-facefusion": "^4.0.3"
+  },
+  "author": "",
+  "license": "MIT"
+}
+

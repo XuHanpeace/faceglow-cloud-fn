@@ -33,8 +33,26 @@ exports.main = async (event, context) => {
   const apiUrl = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/image2image/image-synthesis';
   
   // 从事件中获取参数
-  const prompt = event.prompt || event.text || '';
-  const images = event.images || event.image || null;
+  let payload = event;
+
+  // 处理 HTTP 请求的 body (TCB HTTP 触发器可能将 body 放在 event.body 中且为字符串)
+  if (event.body) {
+    try {
+      const body = typeof event.body === 'string' ? JSON.parse(event.body) : event.body;
+      // 如果 body 中包含 data 字段（前端包裹了 data），则使用 data
+      // 否则使用 body 本身
+      payload = body.data || body;
+    } catch (e) {
+      console.error('解析 event.body 失败:', e);
+      // 解析失败，尝试直接使用 event
+    }
+  } else {
+    // 兼容 SDK 调用
+    payload = event.data || event;
+  }
+  
+  const prompt = payload.prompt || payload.text || '';
+  const images = payload.images || payload.image || null;
   
   if (!prompt) {
     return {
@@ -58,30 +76,30 @@ exports.main = async (event, context) => {
   };
 
   // 添加可选参数到 input
-  if (event.params?.negative_prompt) {
-    input.negative_prompt = event.params.negative_prompt;
+  if (payload.params?.negative_prompt) {
+    input.negative_prompt = payload.params.negative_prompt;
   }
 
   // 构建 parameters 对象
   const parameters = {};
   
   // 添加可选参数到 parameters
-  if (event.params?.n !== undefined) {
-    parameters.n = event.params.n; // 生成数量，范围 1-4，默认 1
+  if (payload.params?.n !== undefined) {
+    parameters.n = payload.params.n; // 生成数量，范围 1-4，默认 1
   } else {
     parameters.n = 1; // 默认生成 1 张图片
   }
   
-  if (event.params?.size) {
-    parameters.size = event.params.size; // 图像尺寸，格式：宽*高
+  if (payload.params?.size) {
+    parameters.size = payload.params.size; // 图像尺寸，格式：宽*高
   }
   
-  if (event.params?.seed !== undefined && event.params?.seed !== null) {
-    parameters.seed = event.params.seed; // 随机种子
+  if (payload.params?.seed !== undefined && payload.params?.seed !== null) {
+    parameters.seed = payload.params.seed; // 随机种子
   }
   
-  if (event.params?.watermark !== undefined) {
-    parameters.watermark = event.params.watermark; // 是否添加水印
+  if (payload.params?.watermark !== undefined) {
+    parameters.watermark = payload.params.watermark; // 是否添加水印
   }
 
   // 构建完整的请求数据

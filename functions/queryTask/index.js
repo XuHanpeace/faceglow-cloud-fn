@@ -20,7 +20,22 @@ exports.main = async (event, context) => {
     };
   }
 
-  const taskId = event.taskId || event.task_id || '';
+  // 从事件中获取参数
+  let payload = event;
+
+  // 处理 HTTP 请求的 body
+  if (event.body) {
+    try {
+      const body = typeof event.body === 'string' ? JSON.parse(event.body) : event.body;
+      payload = body.data || body;
+    } catch (e) {
+      console.error('解析 event.body 失败:', e);
+    }
+  } else {
+    payload = event.data || event;
+  }
+
+  const taskId = payload.taskId || payload.task_id || '';
   
   if (!taskId) {
     return {

@@ -1,0 +1,12 @@
+{
+  "name": "createTransaction",
+  "version": "1.0.0",
+  "description": "腾讯云 TCB 云函数 - 创建交易流水记录",
+  "main": "index.js",
+  "dependencies": {
+    "@cloudbase/node-sdk": "^2.9.1"
+  },
+  "author": "",
+  "license": "MIT"
+}
+
