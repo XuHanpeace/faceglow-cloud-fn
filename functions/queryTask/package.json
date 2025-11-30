@@ -1,0 +1,12 @@
+{
+  "name": "query-task",
+  "version": "1.0.0",
+  "description": "腾讯云 TCB 云函数 - 查询阿里云百炼异步任务结果",
+  "main": "index.js",
+  "dependencies": {
+    "axios": "^1.6.0"
+  },
+  "author": "",
+  "license": "MIT"
+}
+

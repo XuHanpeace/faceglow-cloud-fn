@@ -1,0 +1,29 @@
+# 依赖
+node_modules/
+functions/*/node_modules/
+
+# 日志
+*.log
+npm-debug.log*
+
+# 环境变量和配置
+.env
+.env.local
+
+# 包含敏感信息的配置文件（API Key）
+cloudbaserc.json
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 临时文件
+*.tmp
+*.temp
+

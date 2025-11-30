@@ -1,0 +1,17 @@
+{
+  "envId": "your-env-id",
+  "functionRoot": "functions",
+  "functions": [
+    {
+      "name": "callBailian",
+      "timeout": 60,
+      "envVariables": {
+        "DASHSCOPE_API_KEY": "请在此处填入您的阿里云百炼 API Key"
+      },
+      "runtime": "Nodejs16.13",
+      "handler": "index.main",
+      "memorySize": 512
+    }
+  ]
+}
+
