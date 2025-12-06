@@ -4,7 +4,8 @@
   "description": "腾讯云 TCB 云函数 - 人脸融合",
   "main": "index.js",
   "dependencies": {
-    "tencentcloud-sdk-nodejs-facefusion": "^4.0.3"
+    "tencentcloud-sdk-nodejs-facefusion": "^4.0.3",
+    "@cloudbase/node-sdk": "^2.9.1"
   },
   "author": "",
   "license": "MIT"

@@ -118,13 +118,13 @@ exports.main = async (event, context) => {
     const db = app.database();
     const now = Date.now();
 
-    // 获取用户当前余额（如果未提供 balance_before）
+    // 获取用户当前余额（如果未提供 balance_before，按uid维度查询）
     let balanceBefore = params.balance_before;
     if (balanceBefore === undefined || balanceBefore === null) {
       try {
         const userDoc = await db.collection('users')
           .where({
-            _id: params.user_id
+            uid: params.user_id
           })
           .get();
         
@@ -177,15 +177,24 @@ exports.main = async (event, context) => {
     // 插入交易记录
     const result = await db.collection('transactions').add(transactionData);
 
-    // 如果交易是收入（coin_amount > 0），更新用户余额
+    // 如果交易是收入（coin_amount > 0），更新用户余额（按uid维度更新）
     if (params.coin_amount > 0) {
       try {
-        await db.collection('users')
-          .doc(params.user_id)
-          .update({
-            balance: balanceAfter,
-            updated_at: now
-          });
+        // 先查询用户文档以获取文档ID
+        const userDoc = await db.collection('users')
+          .where({ uid: params.user_id })
+          .get();
+        
+        if (userDoc.data && userDoc.data.length > 0) {
+          const userRecord = userDoc.data[0];
+          const docId = userRecord._id || userRecord._openid;
+          await db.collection('users')
+            .doc(docId)
+            .update({
+              balance: balanceAfter,
+              updated_at: now
+            });
+        }
       } catch (error) {
         console.error('更新用户余额失败:', error);
         // 注意：这里不返回错误，因为交易记录已经创建成功

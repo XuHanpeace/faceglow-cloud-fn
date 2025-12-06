@@ -4,7 +4,8 @@
   "description": "腾讯云 TCB 云函数 - 调用阿里云百炼通义万相2.5模型",
   "main": "index.js",
   "dependencies": {
-    "axios": "^1.6.0"
+    "axios": "^1.6.0",
+    "@cloudbase/node-sdk": "^2.9.1"
   },
   "author": "",
   "license": "MIT"

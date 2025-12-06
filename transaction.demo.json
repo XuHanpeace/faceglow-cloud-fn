@@ -1,107 +1,21 @@
-[
-  {
-    "_id": "transaction_demo_001",
-    "user_id": "user_demo_001",
-    "transaction_type": "bonus",
-    "status": "completed",
-    "coin_amount": 100,
-    "balance_before": 0,
-    "balance_after": 100,
-    "payment_method": "system_bonus",
-    "description": "新用户首次创作AI头像奖励",
-    "created_at": 1704067200000,
-    "updated_at": 1704067200000,
-    "completed_at": 1704067200000,
-    "metadata": {
-      "fusion": {
-        "template_id": "template_001",
-        "activity_id": "activity_new_user_bonus"
-      }
+{
+  "_id": "transaction_demo_001",
+  "user_id": "user_demo_001",
+  "transaction_type": "bonus",
+  "status": "completed",
+  "coin_amount": 100,
+  "balance_before": 0,
+  "balance_after": 100,
+  "payment_method": "system_bonus",
+  "description": "新用户首次创作AI头像奖励",
+  "created_at": 1704067200000,
+  "updated_at": 1704067200000,
+  "completed_at": 1704067200000,
+  "metadata": {
+    "fusion": {
+      "template_id": "template_001",
+      "activity_id": "activity_new_user_bonus"
     }
-  },
-  {
-    "_id": "transaction_demo_002",
-    "user_id": "user_demo_001",
-    "transaction_type": "coin_consumption",
-    "status": "completed",
-    "coin_amount": -50,
-    "balance_before": 100,
-    "balance_after": 50,
-    "payment_method": "internal",
-    "description": "使用AI换脸功能",
-    "related_id": "fusion_task_001",
-    "created_at": 1704070800000,
-    "updated_at": 1704070800000,
-    "completed_at": 1704070800000,
-    "metadata": {
-      "fusion": {
-        "template_id": "template_002",
-        "activity_id": "activity_normal",
-        "result_url": "https://example.com/result_001.jpg"
-      }
-    }
-  },
-  {
-    "_id": "transaction_demo_003",
-    "user_id": "user_demo_001",
-    "transaction_type": "coin_purchase",
-    "status": "completed",
-    "coin_amount": 500,
-    "balance_before": 50,
-    "balance_after": 550,
-    "payment_method": "apple_pay",
-    "description": "购买金币包",
-    "apple_transaction_id": "1000000123456789",
-    "apple_product_id": "coin_package_500",
-    "created_at": 1704074400000,
-    "updated_at": 1704074400000,
-    "completed_at": 1704074400000,
-    "metadata": {
-      "coin_package": {
-        "package_id": "coin_package_500",
-        "package_name": "500金币包",
-        "bonus_coins": 50
-      }
-    }
-  },
-  {
-    "_id": "transaction_demo_004",
-    "user_id": "user_demo_002",
-    "transaction_type": "subscription",
-    "status": "completed",
-    "coin_amount": 0,
-    "balance_before": 200,
-    "balance_after": 200,
-    "payment_method": "apple_pay",
-    "description": "购买月度会员",
-    "apple_transaction_id": "1000000123456790",
-    "apple_product_id": "subscription_monthly",
-    "created_at": 1704078000000,
-    "updated_at": 1704078000000,
-    "completed_at": 1704078000000,
-    "metadata": {
-      "subscription": {
-        "plan_type": "monthly",
-        "expiration_date": 1706670000000
-      }
-    }
-  },
-  {
-    "_id": "transaction_demo_005",
-    "user_id": "user_demo_002",
-    "transaction_type": "refund",
-    "status": "refunded",
-    "coin_amount": -100,
-    "balance_before": 200,
-    "balance_after": 100,
-    "payment_method": "apple_pay",
-    "description": "退款：购买金币包",
-    "apple_transaction_id": "1000000123456789",
-    "apple_product_id": "coin_package_500",
-    "related_id": "transaction_demo_003",
-    "created_at": 1704081600000,
-    "updated_at": 1704081600000,
-    "completed_at": 1704081600000
   }
-]
+}
 
