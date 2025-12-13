@@ -21,7 +21,8 @@ exports.main = async (event, context) => {
     function_types,
     theme_styles,
     activity_tags,
-    sort_by = 'default'
+    sort_by = 'default',
+    include_unpublished = false  // 默认只返回已发布的，传 true 可获取所有数据
   } = body;
 
   try {
@@ -39,6 +40,11 @@ exports.main = async (event, context) => {
     // 如果 models API 不可用，使用传统数据库查询方式
     if (!models) {
       const query = {};
+      
+      // 默认只返回已发布的专辑，如果 include_unpublished 为 true 则不过滤
+      if (!include_unpublished) {
+        query.published = true;
+      }
       
       if (function_types && function_types.length > 0) {
         query.function_type = _.in(function_types);
@@ -90,6 +96,11 @@ exports.main = async (event, context) => {
 
     // 构建查询条件
     const where = {};
+    
+    // 默认只返回已发布的专辑，如果 include_unpublished 为 true 则不过滤
+    if (!include_unpublished) {
+      where.published = true;
+    }
     
     if (function_types && function_types.length > 0) {
       where.function_type = {

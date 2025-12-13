@@ -6,7 +6,10 @@
       "name": "callBailian",
       "timeout": 60,
       "envVariables": {
-        "DASHSCOPE_API_KEY": "请在此处填入您的阿里云百炼 API Key"
+        "DASHSCOPE_API_KEY": "请在此处填入您的阿里云百炼 API Key",
+        "DOUBAO_API_KEY": "请在此处填入您的火山方舟豆包 API Key（用于豆包图生图功能）",
+        "TENCENT_SECRET_ID": "请在此处填入您的腾讯云 SecretId（本地测试时需要）",
+        "TENCENT_SECRET_KEY": "请在此处填入您的腾讯云 SecretKey（本地测试时需要）"
       },
       "runtime": "Nodejs16.13",
       "handler": "index.main",

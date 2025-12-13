@@ -1,0 +1,11 @@
+{
+  "name": "uploadToCOS",
+  "version": "1.0.0",
+  "description": "上传文件到COS云函数",
+  "main": "index.js",
+  "dependencies": {
+    "@cloudbase/node-sdk": "^2.5.0",
+    "busboy": "^1.6.0",
+    "cos-nodejs-sdk-v5": "^2.15.4"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "deleteAlbum",
+  "version": "1.0.0",
+  "description": "删除相册",
+  "main": "index.js",
+  "dependencies": {
+    "@cloudbase/node-sdk": "^2.9.1"
+  }
+}
+

@@ -1,0 +1,11 @@
+{
+  "name": "queryTaskWithoutToken",
+  "version": "1.0.0",
+  "description": "查询百炼任务状态云函数",
+  "main": "index.js",
+  "dependencies": {
+    "@cloudbase/node-sdk": "^2.5.0",
+    "axios": "^1.6.0"
+  }
+}
+

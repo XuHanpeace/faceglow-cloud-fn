@@ -1,0 +1,10 @@
+{
+  "name": "createCategoryConfig",
+  "version": "1.0.0",
+  "description": "Create category config",
+  "main": "index.js",
+  "dependencies": {
+    "@cloudbase/node-sdk": "^2.5.0"
+  }
+}
+

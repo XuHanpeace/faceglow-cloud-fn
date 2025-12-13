@@ -8,10 +8,25 @@ const axios = require('axios');
 
 const FacefusionClient = tencentcloud.facefusion.v20220927.Client;
 
+// 从环境变量获取腾讯云凭证（本地测试时需要）
+// 在云函数部署环境中，这些凭证会自动从云函数运行环境获取
+const secretId = process.env.TENCENT_SECRET_ID || '';
+const secretKey = process.env.TENCENT_SECRET_KEY || '';
+
 // 初始化 CloudBase
-const app = cloudbase.init({
+// 如果在本地测试环境且提供了凭证，则使用凭证初始化
+// 在云函数部署环境中，只需要 env 即可
+const cloudbaseConfig = {
   env: 'startup-2gn33jt0ca955730'
-});
+};
+
+// 本地测试时，如果提供了 secretId 和 secretKey，则添加到配置中
+if (secretId && secretKey) {
+  cloudbaseConfig.secretId = secretId;
+  cloudbaseConfig.secretKey = secretKey;
+}
+
+const app = cloudbase.init(cloudbaseConfig);
 
 // 实例化一个认证对象，入参需要传入腾讯云账户 SecretId 和 SecretKey，此处还需注意密钥对的保密
 // 代码泄露可能会导致 SecretId 和 SecretKey 泄露，并威胁账号下所有资源的安全性
@@ -19,15 +34,15 @@ const app = cloudbase.init({
 // 请参见：https://cloud.tencent.com/document/product/1278/85305
 // 密钥可前往官网控制台 https://console.cloud.tencent.com/cam/capi 进行获取
 
-// 从环境变量获取密钥（请在 cloudbaserc.json 中配置）
-const secretId = process.env.TENCENT_SECRET_ID || '';
-const secretKey = process.env.TENCENT_SECRET_KEY || '';
+// 从环境变量获取密钥（用于腾讯云人脸融合API，请在 cloudbaserc.json 中配置）
+const tencentSecretId = process.env.TENCENT_SECRET_ID || '';
+const tencentSecretKey = process.env.TENCENT_SECRET_KEY || '';
 
 // 如果环境变量中没有配置密钥，使用默认值（仅用于开发，生产环境请使用环境变量）
 const clientConfig = {
     credential: {
-        secretId: secretId,
-        secretKey: secretKey,
+        secretId: tencentSecretId,
+        secretKey: tencentSecretKey,
     },
     region: "ap-shanghai",
     profile: {
@@ -169,8 +184,12 @@ exports.main = async (event, context) => {
         
         console.log('✅ [Fusion] 人脸融合 API 调用成功');
 
+        // 检查响应格式：可能是 { Response: { FusedImage: ... } } 或直接 { FusedImage: ... }
+        const fusedImage = res.Response?.FusedImage || res.FusedImage;
+        const isSuccess = !!fusedImage;
+
         // 如果调用成功且价格大于0，扣减余额并创建流水
-        if (price > 0 && user_id && res.Response && res.Response.FusedImage) {
+        if (price > 0 && user_id && isSuccess) {
             console.log(`💰 [Fusion] 开始扣减余额和创建流水: price=${price}, user_id=${user_id}`);
             try {
                 const db = app.database();
