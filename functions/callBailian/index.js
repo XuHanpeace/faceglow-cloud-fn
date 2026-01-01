@@ -120,12 +120,11 @@ function validateParams(payload, taskType) {
       );
     }
   } else if (taskType === 'doubao_image_to_image') {
-    // 豆包图生图需要至少两张图片
-    const imageArray = Array.isArray(images) ? images : [images];
-    if (imageArray.length < 2) {
+    // 豆包图生图需要至少一张图片（支持单张或多张）
+    if (!images || (Array.isArray(images) && images.length === 0)) {
       return createErrorResponse(
         'MISSING_IMAGES',
-        '豆包图生图任务需要提供至少2张参考图片（images参数应为URL数组）'
+        '豆包图生图任务需要提供 images 参数（图片URL或URL数组）'
       );
     }
   } else {
@@ -379,26 +378,40 @@ function buildDoubaoImageToImageRequest(payload, prompt, images) {
   const apiUrl = 'https://ark.cn-beijing.volces.com/api/v3/images/generations';
   const model = 'doubao-seedream-4-5-251128';
   
-  // 确保 images 是数组
-  const imageArray = Array.isArray(images) ? images : [images];
+  // 根据官方文档：image 参数可以是字符串（单张图片）或数组（多张图片）
+  // 如果只有一张图片，传递字符串；如果多张，传递数组
+  let imageParam;
+  let imageArray;
   
-  if (imageArray.length < 2) {
-    return {
-      error: createErrorResponse('MISSING_IMAGES', '豆包图生图任务需要提供至少2张参考图片（images参数应为URL数组）')
-    };
+  if (Array.isArray(images)) {
+    imageArray = images;
+    // 如果只有一张，转换为字符串（符合官方文档示例）
+    if (imageArray.length === 1) {
+      imageParam = imageArray[0];
+    } else {
+      imageParam = imageArray; // 多张图片传递数组
+    }
+  } else {
+    // 单个字符串，直接使用
+    imageParam = images;
+    imageArray = [images];
   }
   
   // 记录图片顺序信息（用于调试）
-  console.log(`📸 [CallBailian] 豆包图生图图片顺序:`);
-  imageArray.forEach((url, index) => {
-    console.log(`   图${index + 1} (images[${index}]): ${url.substring(0, 80)}...`);
-  });
+  if (imageArray.length > 1) {
+    console.log(`📸 [CallBailian] 豆包图生图图片顺序（${imageArray.length}张）:`);
+    imageArray.forEach((url, index) => {
+      console.log(`   图${index + 1} (images[${index}]): ${url.substring(0, 80)}...`);
+    });
+  } else {
+    console.log(`📸 [CallBailian] 豆包图生图图片（单张）: ${imageParam.substring(0, 80)}...`);
+  }
   console.log(`📝 [CallBailian] 提示词: ${prompt.substring(0, 100)}...`);
   
   const requestData = {
     model: model,
     prompt: prompt,
-    image: imageArray, // 直接传递数组，顺序保持不变
+    image: imageParam, // 单张图片传字符串，多张图片传数组
     response_format: 'url',
     size: '2k', // 固定为 2k（豆包API要求小写：'1k', '2k', '4k' 或 'WIDTHxHEIGHT'）
     stream: false,
@@ -548,7 +561,7 @@ async function callBailianAPI(apiUrl, requestData, apiKey, taskType) {
  * @param {Object} event - 事件对象
  * @param {string} event.task_type - 任务类型（必填）：'image_to_image' | 'image_to_video' | 'video_effect' | 'portrait_style_redraw' | 'doubao_image_to_image'
  * @param {string} event.prompt - 文本提示词（必填，视频特效和人像风格重绘不需要）
- * @param {string|Array} event.images - 图像URL或URL数组（图生图、图生视频、人像风格重绘、豆包图生图必填，豆包图生图需要至少2张图片）
+ * @param {string|Array} event.images - 图像URL或URL数组（图生图、图生视频、人像风格重绘、豆包图生图必填，豆包图生图支持1张或多张图片）
  * @param {string} event.video_url - 视频URL（视频特效可选）
  * @param {Object} event.params - 其他可选参数
  * @param {number} event.params.n - 生成数量（图生图：1-4，默认1）

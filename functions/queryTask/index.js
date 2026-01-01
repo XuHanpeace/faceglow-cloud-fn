@@ -129,6 +129,26 @@ exports.main = async (event, context) => {
     // 调用查询 API
     const response = await queryTaskAPI(apiUrl, apiKey);
 
+    // 检查响应中是否包含错误码（API 返回 HTTP 200 但业务失败的情况）
+    if (response.data.code) {
+      // API 返回了错误码，说明请求失败，需要透传 message
+      const errorCode = response.data.code;
+      const errorMsg = response.data.message || '查询任务失败';
+      
+      console.error('API 返回错误:', errorCode, errorMsg);
+      console.error('错误响应数据:', JSON.stringify(response.data));
+      
+      return createErrorResponse(
+        errorCode,
+        errorMsg,
+        {
+          taskId: taskId,
+          statusCode: 200, // HTTP 状态码是 200，但业务失败
+          details: response.data || null
+        }
+      );
+    }
+
     const output = response.data.output || {};
     const taskStatus = output.task_status || 'UNKNOWN';
 
@@ -155,6 +175,7 @@ exports.main = async (event, context) => {
     console.error('查询任务状态失败:', error);
     console.error('错误响应数据:', JSON.stringify(error.response?.data || {}));
     
+    // 确保透传 API 返回的 message
     const errorCode = error.response?.data?.code || `HTTP_${error.response?.status || 500}`;
     const errorMsg = error.response?.data?.message || error.message || '查询任务失败';
     
