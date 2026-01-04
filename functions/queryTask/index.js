@@ -22,6 +22,19 @@ function createErrorResponse(errCode, errorMsg, data = null) {
 }
 
 /**
+ * 将火山方舟任务状态映射为统一状态
+ */
+function mapVolcStatusToUnified(status) {
+  const s = (typeof status === 'string') ? status.toLowerCase() : '';
+  if (s === 'succeeded' || s === 'success' || s === 'completed') return 'SUCCEEDED';
+  if (s === 'failed' || s === 'error') return 'FAILED';
+  if (s === 'canceled' || s === 'cancelled') return 'CANCELED';
+  if (s === 'pending' || s === 'queued') return 'PENDING';
+  if (s === 'running' || s === 'processing') return 'RUNNING';
+  return 'UNKNOWN';
+}
+
+/**
  * 解析请求参数
  */
 function parsePayload(event) {
@@ -94,6 +107,24 @@ async function queryTaskAPI(apiUrl, apiKey) {
 }
 
 /**
+ * 查询火山方舟视频生成任务
+ * GET https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks/{id}
+ */
+async function queryVolcTaskAPI(apiUrl, apiKey) {
+  console.log('查询任务 URL:', apiUrl);
+
+  const response = await axios.get(apiUrl, {
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    timeout: 10000
+  });
+
+  return response;
+}
+
+/**
  * 查询异步任务结果的云函数
  * 用于查询通义万相2.5异步生成任务的状态和结果
  * 
@@ -103,31 +134,79 @@ async function queryTaskAPI(apiUrl, apiKey) {
  * @returns {Promise<Object>} 任务查询结果
  */
 exports.main = async (event, context) => {
-  // 从环境变量获取 API Key
-  const apiKey = process.env.DASHSCOPE_API_KEY || '';
-  
-  if (!apiKey) {
-    return createErrorResponse(
-      'MISSING_API_KEY',
-      '请先在 cloudbaserc.json 中配置 DASHSCOPE_API_KEY 环境变量'
-    );
-  }
-
   // 解析请求参数
   const payload = parsePayload(event);
   const taskId = payload.taskId || payload.task_id || '';
+  const taskType = payload.task_type || payload.taskType || '';
   
   if (!taskId) {
     return createErrorResponse('MISSING_TASK_ID', '请提供 taskId 参数');
   }
 
-  // 查询任务状态的 API 地址
-  const apiUrl = `https://dashscope.aliyuncs.com/api/v1/tasks/${taskId}`;
   console.log('任务 ID:', taskId);
+  console.log('任务类型:', taskType || '(未传)');
+  console.log('完整 payload:', JSON.stringify(payload));
 
   try {
-    // 调用查询 API
-    const response = await queryTaskAPI(apiUrl, apiKey);
+    // ✅ 双通道查询：根据 taskId 前缀判断
+    // - cgt- 开头 => 火山方舟 Seedance 查询
+    // - 其他 => 万相/DashScope 查询
+    const isVolcTask = taskId && taskId.startsWith('cgt-');
+    
+    if (isVolcTask) {
+      console.log('识别为火山方舟任务（taskId 前缀: cgt-）');
+      const volcApiKey = process.env.ARK_API_KEY || process.env.DOUBAO_API_KEY || '';
+      if (!volcApiKey) {
+        return createErrorResponse(
+          'MISSING_API_KEY',
+          '请先在 cloudbaserc.json 中配置 ARK_API_KEY（或 DOUBAO_API_KEY）环境变量'
+        );
+      }
+
+      const apiUrl = `https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks/${taskId}`;
+      const response = await queryVolcTaskAPI(apiUrl, volcApiKey);
+
+      // 火山返回：{ id, model, status, content: { video_url }, ... }
+      const status = response.data?.status;
+      const unifiedStatus = mapVolcStatusToUnified(status);
+      const videoUrl = response.data?.content?.video_url || null;
+
+      const output = {
+        task_id: response.data?.id || taskId,
+        task_status: unifiedStatus,
+        video_url: videoUrl,
+        submit_time: response.data?.created_at,
+        end_time: response.data?.updated_at
+      };
+
+      const formattedResults = formatResults(output);
+
+      return createSuccessResponse({
+        taskId: taskId,
+        taskStatus: unifiedStatus,
+        output: output,
+        results: formattedResults.length > 0 ? formattedResults : null,
+        submitTime: response.data?.created_at || null,
+        scheduledTime: null,
+        endTime: response.data?.updated_at || null,
+        requestId: response.data?.id || taskId,
+        usage: response.data?.usage || null
+      });
+    }
+
+    // 默认：万相 / DashScope 查询（非 cgt- 开头的 taskId）
+    console.log('识别为万相任务（taskId 前缀: 非 cgt-）');
+    const dashscopeApiKey = process.env.DASHSCOPE_API_KEY || '';
+    if (!dashscopeApiKey) {
+      return createErrorResponse(
+        'MISSING_API_KEY',
+        '请先在 cloudbaserc.json 中配置 DASHSCOPE_API_KEY 环境变量'
+      );
+    }
+
+    // 查询任务状态的 API 地址
+    const apiUrl = `https://dashscope.aliyuncs.com/api/v1/tasks/${taskId}`;
+    const response = await queryTaskAPI(apiUrl, dashscopeApiKey);
 
     // 检查响应中是否包含错误码（API 返回 HTTP 200 但业务失败的情况）
     if (response.data.code) {
@@ -150,7 +229,16 @@ exports.main = async (event, context) => {
     }
 
     const output = response.data.output || {};
-    const taskStatus = output.task_status || 'UNKNOWN';
+    // 万相 API 返回的 task_status 可能在 output.task_status 或 response.data.task_status
+    const taskStatus = output.task_status || response.data.task_status || 'UNKNOWN';
+    
+    console.log('万相 API 响应结构:', JSON.stringify({
+      hasOutput: !!response.data.output,
+      outputTaskStatus: output.task_status,
+      dataTaskStatus: response.data.task_status,
+      finalTaskStatus: taskStatus,
+      outputKeys: output ? Object.keys(output) : []
+    }));
 
     // 格式化结果数组
     const formattedResults = formatResults(output);

@@ -43,6 +43,42 @@ function createErrorResponse(errCode, errorMsg, data = null) {
 }
 
 /**
+ * Seedance 图生视频：将现有 videoParams 映射为 prompt flags
+ * 说明：Seedance 文档示例采用在 prompt 文本中追加 flags（如 --dur 5）
+ */
+function appendSeedanceFlags(basePrompt, params) {
+  if (!basePrompt) return basePrompt;
+  const p = (params && typeof params === 'object') ? params : {};
+
+  let prompt = basePrompt.trim();
+
+  // duration -> --dur
+  if (typeof p.duration === 'number' && Number.isFinite(p.duration) && p.duration > 0) {
+    if (!/--dur\b/i.test(prompt)) {
+      prompt += ` --dur ${p.duration}`;
+    }
+  }
+
+  // fps -> --fps
+  if (typeof p.fps === 'number' && Number.isFinite(p.fps) && p.fps > 0) {
+    if (!/--fps\b/i.test(prompt)) {
+      prompt += ` --fps ${p.fps}`;
+    }
+  }
+
+  // resolution: 480P/720P/1080P -> 480p/720p/1080p，追加 --resolution
+  if (typeof p.resolution === 'string' && p.resolution.trim()) {
+    const raw = p.resolution.trim();
+    const normalized = raw.replace(/P$/i, 'p');
+    if (!/--resolution\b/i.test(prompt)) {
+      prompt += ` --resolution ${normalized}`;
+    }
+  }
+
+  return prompt;
+}
+
+/**
  * 解析请求参数
  */
 function parsePayload(event) {
@@ -225,45 +261,35 @@ function buildImageToImageRequest(payload, prompt, images) {
  * 构建图生视频请求参数
  */
 function buildImageToVideoRequest(payload, prompt, images, audioUrl) {
-  const apiUrl = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis';
-  const model = 'wan2.5-i2v-preview';
-  
-  const input = {
-    img_url: Array.isArray(images) ? images[0] : images // 图生视频只需要一张图片，使用img_url字段（必填）
-  };
-  
-  // prompt是可选的，如果有则添加
-  if (prompt) {
-    input.prompt = prompt;
-  }
+  // ✅ 改为火山方舟 Seedance 1.5 pro 图生视频（异步任务：返回 id）
+  // 文档示例：POST https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks
+  const apiUrl = 'https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks';
+  const model = 'doubao-seedance-1-5-pro-251215';
 
-  // audio_url是可选的，仅wan2.5-i2v-preview支持
-  if (audioUrl) {
-    input.audio_url = audioUrl;
-  }
-  
-  // parameters对象，包含resolution等参数
-  const parameters = {};
-  
-  // resolution是可选的，支持480P、720P、1080P，默认720P
-  if (payload.params?.resolution) {
-    parameters.resolution = payload.params.resolution;
-  }
+  const imageUrl = Array.isArray(images) ? images[0] : images;
 
-  const requestData = {
-    model: model,
-    input: input,
-    parameters: Object.keys(parameters).length > 0 ? parameters : undefined
-  };
-  
-  // 如果没有parameters，移除空对象
-  if (!requestData.parameters || Object.keys(requestData.parameters).length === 0) {
-    delete requestData.parameters;
-  }
+  // generate_audio：强制设置为 true
+  const generateAudio = true;
 
   return {
+    provider: 'volc',
     apiUrl,
-    requestData
+    requestData: {
+      model,
+      content: [
+        {
+          type: 'text',
+          text: prompt
+        },
+        {
+          type: 'image_url',
+          image_url: {
+            url: imageUrl
+          }
+        }
+      ],
+      generate_audio: generateAudio
+    }
   };
 }
 
@@ -537,13 +563,32 @@ async function callBailianAPI(apiUrl, requestData, apiKey, taskType) {
   };
   
   // 对于需要异步的任务，添加 X-DashScope-Async 头（豆包图生图是同步返回，不需要此头）
-  if (taskType === 'image_to_image' || taskType === 'image_to_video' || taskType === 'video_effect' || taskType === 'portrait_style_redraw') {
+  if (taskType === 'image_to_image' || taskType === 'video_effect' || taskType === 'portrait_style_redraw') {
     headers['X-DashScope-Async'] = 'enable';
   }
   
   const response = await axios.post(apiUrl, requestData, {
     headers: headers,
     timeout: 60000 // 豆包图生图可能需要更长时间，设置为60秒
+  });
+
+  return response;
+}
+
+/**
+ * 调用火山方舟内容生成（Seedance）API
+ */
+async function callVolcContentGenerationAPI(apiUrl, requestData, apiKey) {
+  console.log(`🚀 [CallBailian] 调用火山方舟 API`);
+  console.log('📡 [CallBailian] 请求 URL:', apiUrl);
+  console.log('📤 [CallBailian] 请求数据:', JSON.stringify(requestData));
+
+  const response = await axios.post(apiUrl, requestData, {
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    timeout: 60000
   });
 
   return response;
@@ -588,17 +633,16 @@ exports.main = async (event, context) => {
   const taskType = payload.task_type || payload.taskType || 'image_to_image';
   
   // 根据任务类型选择对应的 API Key
-  // - 豆包图生图任务：使用 DOUBAO_API_KEY 或 ARK_API_KEY
-  // - 其他任务（阿里百炼）：使用 DASHSCOPE_API_KEY
+  // - 火山（Seedance 图生视频 / 豆包图生图）：使用 ARK_API_KEY（或 DOUBAO_API_KEY 兼容）
+  // - 其他任务（阿里百炼 / 万相 / 视频特效 / 人像风格重绘）：使用 DASHSCOPE_API_KEY
   let apiKey = '';
   let apiKeyEnvName = '';
   
-  if (taskType === 'doubao_image_to_image') {
-    // 豆包图生图任务：使用豆包 API Key
-    // 优先级：DOUBAO_API_KEY > ARK_API_KEY
-    apiKey = process.env.DOUBAO_API_KEY || process.env.ARK_API_KEY || '';
-    apiKeyEnvName = 'DOUBAO_API_KEY 或 ARK_API_KEY';
-    console.log('🔑 [CallBailian] 使用豆包 API Key（任务类型: doubao_image_to_image）');
+  if (taskType === 'doubao_image_to_image' || taskType === 'image_to_video') {
+    // 火山方舟任务：优先 ARK_API_KEY；兼容 DOUBAO_API_KEY
+    apiKey = process.env.ARK_API_KEY || process.env.DOUBAO_API_KEY || '';
+    apiKeyEnvName = 'ARK_API_KEY（或 DOUBAO_API_KEY）';
+    console.log(`🔑 [CallBailian] 使用火山方舟 API Key（任务类型: ${taskType}）`);
   } else {
     // 其他任务（阿里百炼）：使用阿里云百炼 API Key
     apiKey = process.env.DASHSCOPE_API_KEY || '';
@@ -620,6 +664,9 @@ exports.main = async (event, context) => {
   const images = payload.images || payload.image || null;
   const videoUrl = payload.video_url || payload.videoUrl || null;
   const audioUrl = payload.audio_url || payload.audioUrl || null;
+  const enableCustomPrompt = payload.enable_custom_prompt === true || payload.enableCustomPrompt === true;
+  const customPromptRaw = payload.custom_prompt || payload.customPrompt || '';
+  const customPrompt = typeof customPromptRaw === 'string' ? customPromptRaw.trim() : '';
   const user_id = payload.user_id;
   const price = payload.price || 0;
   
@@ -651,16 +698,49 @@ exports.main = async (event, context) => {
   }
 
   // 构建请求参数
-  const requestParams = buildRequestParams(payload, taskType, prompt, images, videoUrl, audioUrl);
+  // 图生视频：拼接 prompt + custom_prompt，并将 videoParams 映射为 flags
+  const promptForRequest = (taskType === 'image_to_video')
+    ? appendSeedanceFlags(
+        (enableCustomPrompt && customPrompt) ? `${prompt} ${customPrompt}` : prompt,
+        payload.params
+      )
+    : prompt;
+
+  const requestParams = buildRequestParams(payload, taskType, promptForRequest, images, videoUrl, audioUrl);
   if (requestParams.error) {
     return requestParams.error;
   }
 
-  const { apiUrl, requestData } = requestParams;
+  const { apiUrl, requestData, provider } = requestParams;
 
   try {
-    // 调用阿里云百炼 API 或豆包 API
-    const response = await callBailianAPI(apiUrl, requestData, apiKey, taskType);
+    // 调用 API：火山（Seedance）/ 阿里百炼 / 豆包
+    const response = provider === 'volc'
+      ? await callVolcContentGenerationAPI(apiUrl, requestData, apiKey)
+      : await callBailianAPI(apiUrl, requestData, apiKey, taskType);
+
+    // Seedance 图生视频：异步创建任务，返回 id
+    if (taskType === 'image_to_video' && provider === 'volc') {
+      const taskId = response.data?.id;
+      if (!taskId) {
+        return createErrorResponse(
+          'NO_TASK_ID',
+          'Seedance 图生视频未返回任务ID',
+          response.data
+        );
+      }
+
+      // 如果调用成功且价格大于0，扣减余额并创建流水
+      if (price > 0 && user_id) {
+        await deductBalanceAndCreateTransaction(user_id, price, taskType, taskId, promptForRequest);
+      }
+
+      return createSuccessResponse({
+        taskId: taskId,
+        requestId: taskId,
+        message: '任务已提交，请使用 taskId 查询结果'
+      });
+    }
 
     // 豆包图生图是同步返回，直接返回结果URL
     if (taskType === 'doubao_image_to_image') {
