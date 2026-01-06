@@ -1,0 +1,10 @@
+{
+  "name": "getWorkById",
+  "version": "1.0.0",
+  "description": "根据作品ID获取作品详情（公开访问）",
+  "main": "index.js",
+  "dependencies": {
+    "@cloudbase/node-sdk": "^2.5.0"
+  }
+}
+

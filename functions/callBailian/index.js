@@ -699,12 +699,15 @@ exports.main = async (event, context) => {
 
   // 构建请求参数
   // 图生视频：拼接 prompt + custom_prompt，并将 videoParams 映射为 flags
+  // 豆包图生图：如果启用了自定义提示词，也拼接 prompt + custom_prompt
+  let basePrompt = prompt;
+  if (enableCustomPrompt && customPrompt) {
+    basePrompt = `${prompt} ${customPrompt}`;
+  }
+  
   const promptForRequest = (taskType === 'image_to_video')
-    ? appendSeedanceFlags(
-        (enableCustomPrompt && customPrompt) ? `${prompt} ${customPrompt}` : prompt,
-        payload.params
-      )
-    : prompt;
+    ? appendSeedanceFlags(basePrompt, payload.params)
+    : basePrompt;
 
   const requestParams = buildRequestParams(payload, taskType, promptForRequest, images, videoUrl, audioUrl);
   if (requestParams.error) {
