@@ -118,9 +118,9 @@ exports.main = async (event, context) => {
   }
   
   // 支持两种参数格式：
-  // 1. 直接传递：{ workId, workResourceUrl }
-  // 2. 通过 data 包装：{ data: { workId, workResourceUrl } }
-  const { workId, workResourceUrl } = body.data || body;
+  // 1. 直接传递：{ workId, workResourceUrl, skipCosUpload?, resourceType? }
+  // 2. 通过 data 包装：{ data: { workId, workResourceUrl, skipCosUpload?, resourceType? } }
+  const { workId, workResourceUrl, skipCosUpload, resourceType } = body.data || body;
 
   // 验证参数
   if (!workId || !workResourceUrl) {
@@ -231,11 +231,24 @@ exports.main = async (event, context) => {
     }
 
     // 4. 判断 workResourceUrl 是否已经是 COS 持久化 URL
-    // 如果是 COS URL（包含 myqcloud.com 或 cos.），直接使用；否则下载并上传
+    // 图片：如果不是 COS URL（包含 myqcloud.com 或 cos.），则下载并上传到 COS
+    // 视频：默认不上传（文件较大），直接写入原始 URL（用于分享页根据 workId 查询）
     let cosUrl = workResourceUrl;
     const isCOSUrl = workResourceUrl.includes('myqcloud.com') || workResourceUrl.includes('cos.');
+
+    // 兼容不同类型的 skipCosUpload（boolean/string/number）
+    const skipCos =
+      skipCosUpload === true ||
+      skipCosUpload === 'true' ||
+      skipCosUpload === 1 ||
+      skipCosUpload === '1';
+    const normalizedResourceType = typeof resourceType === 'string' ? resourceType.toLowerCase() : '';
+    const isVideo =
+      normalizedResourceType === 'video' ||
+      skipCos ||
+      /\.mp4(\?|$)/i.test(workResourceUrl);
     
-    if (!isCOSUrl) {
+    if (!isCOSUrl && !isVideo) {
       // 不是 COS URL，需要下载并上传
       console.log('开始下载作品资源:', workResourceUrl);
       const { buffer, contentType } = await downloadFile(workResourceUrl);
@@ -245,6 +258,9 @@ exports.main = async (event, context) => {
       const uploadResult = await uploadToCOS(buffer, fileName, contentType);
       cosUrl = uploadResult.url;
       console.log('作品已上传到COS:', cosUrl);
+    } else if (isVideo) {
+      // 视频：跳过 COS 上传，直接使用原始 URL
+      console.log('📹 视频资源跳过COS上传，直接使用原始URL:', cosUrl);
     } else {
       console.log('作品资源已是 COS 持久化 URL，直接使用:', cosUrl);
     }
@@ -257,6 +273,7 @@ exports.main = async (event, context) => {
       work_url: cosUrl,
       work_album_id: albumId,
       username: username,
+      resource_type: isVideo ? 'video' : 'image',
     };
 
     try {
