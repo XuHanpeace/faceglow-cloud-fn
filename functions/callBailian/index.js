@@ -1,5 +1,7 @@
 const axios = require('axios');
 const cloudbase = require('@cloudbase/node-sdk');
+const tencentcloud = require("tencentcloud-sdk-nodejs-hunyuan");
+const HunyuanClient = tencentcloud.hunyuan.v20230901.Client;
 
 // 从环境变量获取腾讯云凭证（本地测试时需要）
 // 在云函数部署环境中，这些凭证会自动从云函数运行环境获取
@@ -40,6 +42,25 @@ function createErrorResponse(errCode, errorMsg, data = null) {
     errCode: errCode,
     errorMsg: errorMsg
   };
+}
+
+/**
+ * 获取混元大模型客户端实例
+ */
+function getHunyuanClient() {
+  const clientConfig = {
+    credential: {
+      secretId: process.env.HUNYUAN_SECRET_ID || '',
+      secretKey: process.env.HUNYUAN_SECRET_KEY || '',
+    },
+    region: "ap-guangzhou",
+    profile: {
+      httpProfile: {
+        endpoint: "hunyuan.tencentcloudapi.com",
+      },
+    },
+  };
+  return new HunyuanClient(clientConfig);
 }
 
 /**
@@ -116,6 +137,17 @@ function validateParams(payload, taskType) {
     return createErrorResponse('MISSING_PROMPT', '请提供 prompt 参数（文本提示词）');
   }
 
+  // 混元生图：需要 prompt（必填，已在上面检查）+ images（用户自拍图作为 ContentImage 参考图）
+  if (taskType === 'hunyuan_image') {
+    if (!images) {
+      return createErrorResponse(
+        'MISSING_IMAGES',
+        '混元生图任务需要提供 images 参数（用户自拍图URL，用于 ContentImage 引导生图内容）'
+      );
+    }
+    return null; // 验证通过
+  }
+
   // 根据任务类型验证必填参数
   if (taskType === 'image_to_image' || taskType === 'image_to_video' || taskType === 'doubao_image_to_image') {
     if (!images) {
@@ -166,7 +198,7 @@ function validateParams(payload, taskType) {
   } else {
     return createErrorResponse(
       'INVALID_TASK_TYPE',
-      `不支持的任务类型: ${taskType}。支持的类型: image_to_image, image_to_video, video_effect, portrait_style_redraw, doubao_image_to_image`
+      `不支持的任务类型: ${taskType}。支持的类型: image_to_image, image_to_video, video_effect, portrait_style_redraw, doubao_image_to_image, hunyuan_image`
     );
   }
 
@@ -452,6 +484,71 @@ function buildDoubaoImageToImageRequest(payload, prompt, images) {
 }
 
 /**
+ * 构建混元生图请求参数
+ * 使用腾讯混元大模型 SDK（SubmitHunyuanImageJob）
+ * 文档：https://cloud.tencent.com/document/api/1729/105969
+ * 
+ * @param {Object} payload - 请求载荷
+ * @param {string} prompt - 提示词文本
+ * @param {string|Array<string>} images - 参考图 URL（用户自拍图），用于 ContentImage 引导生成内容
+ * 
+ * ContentImage 说明（文档）：
+ * - 用于引导内容的参考图。图片限制：单边分辨率小于5000，转成 Base64 字符串后小于 8MB
+ * - 格式支持 jpg、jpeg、png
+ * - 传入 ContentImage 时，分辨率仅支持：768:768、768:1024、1024:768、1024:1024
+ * - 如果参考图被用于做风格转换，将生成保持原图长宽比例且长边为1024的图片
+ * - 传入 ContentImage 时，建议开启 Revise（扩写），以提升生成效果
+ */
+function buildHunyuanImageRequest(payload, prompt, images) {
+  const params = {
+    Prompt: prompt,
+    Resolution: payload.params?.resolution || '720:1280',  // 默认 9:16 竖图
+    LogoAdd: 0,  // 不添加水印
+    Revise: payload.params?.revise !== undefined ? payload.params.revise : 1,  // 默认开启扩写（hunyuan_revise 默认启用）
+  };
+
+  // ContentImage：用户自拍图作为参考图引导生成（混元 API 仅支持单张参考图）
+  // images 可以是字符串（单张 URL）或数组；多张时只取第一张传给 API，其余仅做入参透传
+  const imageUrl = Array.isArray(images) ? images[0] : images;
+  if (imageUrl) {
+    params.ContentImage = {
+      ImageUrl: imageUrl
+    };
+    if (Array.isArray(images) && images.length > 1) {
+      console.log(`📸 [CallBailian] 混元生图收到 ${images.length} 张图，API 仅支持单张参考图，已使用第一张作为 ContentImage`);
+    }
+    console.log(`📸 [CallBailian] 混元生图设置 ContentImage: ${imageUrl.substring(0, 80)}...`);
+    
+    // 传入 ContentImage 时，分辨率仅支持：768:768、768:1024、1024:768、1024:1024
+    // 如果当前设置的分辨率不在支持列表中，自动调整为 768:1024（接近 9:16 比例）
+    const supportedResolutionsWithImage = ['768:768', '768:1024', '1024:768', '1024:1024'];
+    if (!supportedResolutionsWithImage.includes(params.Resolution)) {
+      const originalResolution = params.Resolution;
+      params.Resolution = '768:1024'; // 3:4 比例，最接近 9:16
+      console.log(`⚠️ [CallBailian] 传入参考图时分辨率 ${originalResolution} 不支持，已自动调整为 ${params.Resolution}`);
+    }
+  }
+
+  if (payload.params?.negative_prompt) {
+    params.NegativePrompt = payload.params.negative_prompt;
+  }
+  if (payload.params?.style) {
+    params.Style = payload.params.style;
+  }
+  if (payload.params?.num) {
+    params.Num = payload.params.num;
+  }
+  if (payload.params?.seed) {
+    params.Seed = payload.params.seed;
+  }
+
+  return {
+    provider: 'hunyuan',
+    hunyuanParams: params
+  };
+}
+
+/**
  * 构建请求参数（根据任务类型）
  */
 function buildRequestParams(payload, taskType, prompt, images, videoUrl, audioUrl) {
@@ -465,6 +562,8 @@ function buildRequestParams(payload, taskType, prompt, images, videoUrl, audioUr
     return buildPortraitStyleRedrawRequest(payload, images);
   } else if (taskType === 'doubao_image_to_image') {
     return buildDoubaoImageToImageRequest(payload, prompt, images);
+  } else if (taskType === 'hunyuan_image') {
+    return buildHunyuanImageRequest(payload, prompt, images);
   } else {
     return {
       error: createErrorResponse('INVALID_TASK_TYPE', `不支持的任务类型: ${taskType}`)
@@ -514,7 +613,8 @@ async function deductBalanceAndCreateTransaction(userId, price, taskType, taskId
       'image_to_video': '使用AI图生视频功能',
       'video_effect': '使用AI视频特效功能',
       'portrait_style_redraw': '使用AI人像风格重绘功能',
-      'doubao_image_to_image': '使用豆包图生图功能'
+      'doubao_image_to_image': '使用豆包图生图功能',
+      'hunyuan_image': '使用混元生图功能'
     };
     
     const transactionData = {
@@ -596,15 +696,16 @@ async function callVolcContentGenerationAPI(apiUrl, requestData, apiKey) {
 
 /**
  * 调用阿里云百炼模型的云函数
- * 支持五种任务类型：
+ * 支持六种任务类型：
  * 1. image_to_image - 图生图（通义万相2.5）
  * 2. image_to_video - 图生视频
  * 3. video_effect - 视频特效
  * 4. portrait_style_redraw - 人像风格重绘
  * 5. doubao_image_to_image - 豆包图生图（同步返回，不需要TaskId轮询）
+ * 6. hunyuan_image - 混元生图（腾讯混元大模型，异步任务）
  * 
  * @param {Object} event - 事件对象
- * @param {string} event.task_type - 任务类型（必填）：'image_to_image' | 'image_to_video' | 'video_effect' | 'portrait_style_redraw' | 'doubao_image_to_image'
+ * @param {string} event.task_type - 任务类型（必填）：'image_to_image' | 'image_to_video' | 'video_effect' | 'portrait_style_redraw' | 'doubao_image_to_image' | 'hunyuan_image'
  * @param {string} event.prompt - 文本提示词（必填，视频特效和人像风格重绘不需要）
  * @param {string|Array} event.images - 图像URL或URL数组（图生图、图生视频、人像风格重绘、豆包图生图必填，豆包图生图支持1张或多张图片）
  * @param {string} event.video_url - 视频URL（视频特效可选）
@@ -621,7 +722,7 @@ async function callVolcContentGenerationAPI(apiUrl, requestData, apiKey) {
  * @param {boolean} event.params.watermark - 是否添加水印（可选）
  * @param {Object} context - 上下文对象
  * @returns {Promise<Object>} API 响应结果
- *   - 异步任务（image_to_image, image_to_video, video_effect, portrait_style_redraw）：包含 taskId 用于查询任务状态
+ *   - 异步任务（image_to_image, image_to_video, video_effect, portrait_style_redraw, hunyuan_image）：包含 taskId 用于查询任务状态
  *   - 同步任务（doubao_image_to_image）：直接返回 resultUrl
  */
 exports.main = async (event, context) => {
@@ -638,7 +739,20 @@ exports.main = async (event, context) => {
   let apiKey = '';
   let apiKeyEnvName = '';
   
-  if (taskType === 'doubao_image_to_image' || taskType === 'image_to_video') {
+  if (taskType === 'hunyuan_image') {
+    // 混元生图：使用腾讯云 SecretId/SecretKey（通过 SDK 调用，不需要 apiKey）
+    const hunyuanSecretId = process.env.HUNYUAN_SECRET_ID || '';
+    const hunyuanSecretKey = process.env.HUNYUAN_SECRET_KEY || '';
+    if (!hunyuanSecretId || !hunyuanSecretKey) {
+      return createErrorResponse(
+        'MISSING_API_KEY',
+        '请先在 cloudbaserc.json 中配置 HUNYUAN_SECRET_ID 和 HUNYUAN_SECRET_KEY 环境变量（需要在腾讯云控制台获取）'
+      );
+    }
+    apiKey = 'hunyuan_sdk'; // 占位，实际通过 SDK 调用
+    apiKeyEnvName = 'HUNYUAN_SECRET_ID / HUNYUAN_SECRET_KEY';
+    console.log(`🔑 [CallBailian] 使用腾讯混元 SDK（任务类型: ${taskType}）`);
+  } else if (taskType === 'doubao_image_to_image' || taskType === 'image_to_video') {
     // 火山方舟任务：优先 ARK_API_KEY；兼容 DOUBAO_API_KEY
     apiKey = process.env.ARK_API_KEY || process.env.DOUBAO_API_KEY || '';
     apiKeyEnvName = 'ARK_API_KEY（或 DOUBAO_API_KEY）';
@@ -650,7 +764,7 @@ exports.main = async (event, context) => {
     console.log('🔑 [CallBailian] 使用阿里云百炼 API Key（任务类型: ' + taskType + '）');
   }
   
-  // 如果没有配置对应的 API Key，返回错误
+  // 如果没有配置对应的 API Key，返回错误（混元已在上面单独检查）
   if (!apiKey) {
     return createErrorResponse(
       'MISSING_API_KEY',
@@ -714,9 +828,46 @@ exports.main = async (event, context) => {
     return requestParams.error;
   }
 
-  const { apiUrl, requestData, provider } = requestParams;
+  const { apiUrl, requestData, provider, hunyuanParams } = requestParams;
 
   try {
+    // 混元生图：通过 SDK 调用 SubmitHunyuanImageJob
+    if (provider === 'hunyuan') {
+      console.log(`🚀 [CallBailian] 调用混元生图 SDK`);
+      console.log('📤 [CallBailian] 请求参数:', JSON.stringify(hunyuanParams));
+      
+      const client = getHunyuanClient();
+      const hunyuanResponse = await client.SubmitHunyuanImageJob(hunyuanParams);
+      
+      console.log('📥 [CallBailian] 混元响应:', JSON.stringify(hunyuanResponse));
+      
+      const jobId = hunyuanResponse.JobId;
+      if (!jobId) {
+        return createErrorResponse(
+          'NO_TASK_ID',
+          '混元生图未返回任务ID（JobId）',
+          hunyuanResponse
+        );
+      }
+      
+      console.log(`✅ [CallBailian] 混元生图任务提交成功，JobId=${jobId}`);
+      
+      // 如果调用成功且价格大于0，扣减余额并创建流水
+      if (price > 0 && user_id) {
+        await deductBalanceAndCreateTransaction(user_id, price, taskType, jobId, promptForRequest);
+      } else {
+        if (price === 0) {
+          console.log('🆓 [CallBailian] 免费模板，无需扣减余额');
+        }
+      }
+      
+      return createSuccessResponse({
+        taskId: jobId,
+        requestId: hunyuanResponse.RequestId || jobId,
+        message: '混元生图任务已提交，请使用 taskId 查询结果'
+      });
+    }
+
     // 调用 API：火山（Seedance）/ 阿里百炼 / 豆包
     const response = provider === 'volc'
       ? await callVolcContentGenerationAPI(apiUrl, requestData, apiKey)

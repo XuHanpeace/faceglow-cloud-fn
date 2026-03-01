@@ -4,7 +4,8 @@
   "description": "腾讯云 TCB 云函数 - 查询阿里云百炼异步任务结果",
   "main": "index.js",
   "dependencies": {
-    "axios": "^1.6.0"
+    "axios": "^1.6.0",
+    "tencentcloud-sdk-nodejs-hunyuan": "^4.0.0"
   },
   "author": "",
   "license": "MIT"

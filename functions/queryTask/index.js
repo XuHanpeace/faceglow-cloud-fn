@@ -1,4 +1,6 @@
 const axios = require('axios');
+const tencentcloud = require("tencentcloud-sdk-nodejs-hunyuan");
+const HunyuanClient = tencentcloud.hunyuan.v20230901.Client;
 
 /**
  * 标准化响应格式
@@ -32,6 +34,47 @@ function mapVolcStatusToUnified(status) {
   if (s === 'pending' || s === 'queued') return 'PENDING';
   if (s === 'running' || s === 'processing') return 'RUNNING';
   return 'UNKNOWN';
+}
+
+/**
+ * 将混元生图任务状态码映射为统一状态
+ * 混元 JobStatusCode: 1=等待中, 2=运行中, 4=处理失败, 5=处理完成
+ */
+function mapHunyuanStatusToUnified(statusCode) {
+  const code = String(statusCode);
+  if (code === '5') return 'SUCCEEDED';
+  if (code === '4') return 'FAILED';
+  if (code === '1') return 'PENDING';
+  if (code === '2') return 'RUNNING';
+  return 'UNKNOWN';
+}
+
+/**
+ * 获取混元大模型客户端实例
+ */
+function getHunyuanClient() {
+  const clientConfig = {
+    credential: {
+      secretId: process.env.HUNYUAN_SECRET_ID || '',
+      secretKey: process.env.HUNYUAN_SECRET_KEY || '',
+    },
+    region: "ap-guangzhou",
+    profile: {
+      httpProfile: {
+        endpoint: "hunyuan.tencentcloudapi.com",
+      },
+    },
+  };
+  return new HunyuanClient(clientConfig);
+}
+
+/**
+ * 判断 taskId 是否为混元生图的 JobId
+ * 混元 JobId 格式：数字-数字-uuid片段-uuid片段-...-0
+ * 示例：251197749-1731412663-d4e1f224-fa21-40bc-9ee7-4bb13abece6e-0
+ */
+function isHunyuanJobId(taskId) {
+  return /^\d+-\d+-[0-9a-f]{8}-/.test(taskId);
 }
 
 /**
@@ -126,7 +169,7 @@ async function queryVolcTaskAPI(apiUrl, apiKey) {
 
 /**
  * 查询异步任务结果的云函数
- * 用于查询通义万相2.5异步生成任务的状态和结果
+ * 支持查询：通义万相/DashScope、火山方舟/Seedance、混元生图 三种任务
  * 
  * @param {Object} event - 事件对象
  * @param {string} event.taskId - 任务ID（必填），从 callBailian 函数返回的 taskId
@@ -148,11 +191,66 @@ exports.main = async (event, context) => {
   console.log('完整 payload:', JSON.stringify(payload));
 
   try {
-    // ✅ 双通道查询：根据 taskId 前缀判断
+    // ✅ 三通道查询：根据 taskId 格式判断
     // - cgt- 开头 => 火山方舟 Seedance 查询
+    // - 数字-数字-hex 格式 => 混元生图查询
     // - 其他 => 万相/DashScope 查询
     const isVolcTask = taskId && taskId.startsWith('cgt-');
+    const isHunyuanTask = !isVolcTask && isHunyuanJobId(taskId);
     
+    // 混元生图任务查询
+    if (isHunyuanTask) {
+      console.log('识别为混元生图任务（taskId 格式: 数字-数字-uuid）');
+      
+      const hunyuanSecretId = process.env.HUNYUAN_SECRET_ID || '';
+      const hunyuanSecretKey = process.env.HUNYUAN_SECRET_KEY || '';
+      if (!hunyuanSecretId || !hunyuanSecretKey) {
+        return createErrorResponse(
+          'MISSING_API_KEY',
+          '请先在 cloudbaserc.json 中配置 HUNYUAN_SECRET_ID 和 HUNYUAN_SECRET_KEY 环境变量'
+        );
+      }
+
+      const client = getHunyuanClient();
+      console.log('查询混元生图任务, JobId:', taskId);
+      const hunyuanResult = await client.QueryHunyuanImageJob({ JobId: taskId });
+      
+      console.log('混元查询结果:', JSON.stringify(hunyuanResult));
+      
+      const jobStatusCode = hunyuanResult.JobStatusCode;
+      const unifiedStatus = mapHunyuanStatusToUnified(jobStatusCode);
+      
+      // 构建 output 对象
+      const output = {
+        task_id: taskId,
+        task_status: unifiedStatus,
+        job_status_code: jobStatusCode,
+        job_status_msg: hunyuanResult.JobStatusMsg || '',
+        job_error_code: hunyuanResult.JobErrorCode || '',
+        job_error_msg: hunyuanResult.JobErrorMsg || '',
+        revised_prompt: hunyuanResult.RevisedPrompt || [],
+      };
+      
+      // 格式化结果：ResultImage 数组映射为 [{ url: imageUrl }]
+      const formattedResults = (hunyuanResult.ResultImage || []).map((imageUrl, index) => ({
+        url: imageUrl,
+        orig_prompt: (hunyuanResult.RevisedPrompt && hunyuanResult.RevisedPrompt[index]) || null,
+        detail: (hunyuanResult.ResultDetails && hunyuanResult.ResultDetails[index]) || null
+      }));
+
+      return createSuccessResponse({
+        taskId: taskId,
+        taskStatus: unifiedStatus,
+        output: output,
+        results: formattedResults.length > 0 ? formattedResults : null,
+        submitTime: null,
+        scheduledTime: null,
+        endTime: null,
+        requestId: hunyuanResult.RequestId || taskId,
+        usage: null
+      });
+    }
+
     if (isVolcTask) {
       console.log('识别为火山方舟任务（taskId 前缀: cgt-）');
       const volcApiKey = process.env.ARK_API_KEY || process.env.DOUBAO_API_KEY || '';
@@ -194,8 +292,8 @@ exports.main = async (event, context) => {
       });
     }
 
-    // 默认：万相 / DashScope 查询（非 cgt- 开头的 taskId）
-    console.log('识别为万相任务（taskId 前缀: 非 cgt-）');
+    // 默认：万相 / DashScope 查询（非 cgt- 开头、非混元格式的 taskId）
+    console.log('识别为万相任务（taskId 前缀: 非 cgt-，非混元格式）');
     const dashscopeApiKey = process.env.DASHSCOPE_API_KEY || '';
     if (!dashscopeApiKey) {
       return createErrorResponse(
